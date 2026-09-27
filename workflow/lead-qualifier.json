@@ -1,0 +1,197 @@
+{
+  "name": "AI Lead Qualifier",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-qualifier",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1f6a6b3e-0001-4a3e-9c1a-000000000001",
+      "name": "Webhook - New Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-40, 300],
+      "webhookId": "lead-qualifier-inbound"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            { "name": "name", "stringValue": "={{ $json.body.name || $json.body.full_name }}" },
+            { "name": "company", "stringValue": "={{ $json.body.company || \"\" }}" },
+            { "name": "message", "stringValue": "={{ $json.body.message || $json.body.notes || \"\" }}" },
+            { "name": "company_size", "stringValue": "={{ $json.body.company_size || \"\" }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1f6a6b3e-0002-4a3e-9c1a-000000000002",
+      "name": "Normalize Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SCORING_SERVICE_URL }}/score",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"name\": $json.name, \"company\": $json.company, \"message\": $json.message, \"company_size\": $json.company_size } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "1f6a6b3e-0003-4a3e-9c1a-000000000003",
+      "name": "Call Scoring Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.tier }}",
+              "rightValue": "hot",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "1f6a6b3e-0004-4a3e-9c1a-000000000004",
+      "name": "Is Hot Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [620, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.tier }}",
+              "rightValue": "warm",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "1f6a6b3e-0005-4a3e-9c1a-000000000005",
+      "name": "Is Warm Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [620, 420]
+    },
+    {
+      "parameters": {
+        "channel": "#new-leads",
+        "text": "=🔥 Hot lead: *{{ $('Normalize Payload').item.json.name }}* ({{ $('Normalize Payload').item.json.company }})\nScore: {{ $json.score }}\nSummary: {{ $json.summary }}",
+        "otherOptions": {}
+      },
+      "id": "1f6a6b3e-0006-4a3e-9c1a-000000000006",
+      "name": "Slack - Alert Sales",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [860, 140]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "additionalFields": {}
+      },
+      "id": "1f6a6b3e-0007-4a3e-9c1a-000000000007",
+      "name": "CRM - Create/Update Contact",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "additionalFields": { "lifecycleStage": "nurture" }
+      },
+      "id": "1f6a6b3e-0008-4a3e-9c1a-000000000008",
+      "name": "CRM - Add to Nurture List",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [860, 420]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "1f6a6b3e-0009-4a3e-9c1a-000000000009",
+      "name": "Log Cold Lead",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [860, 560]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"received\", \"tier\": $json.tier } }}"
+      },
+      "id": "1f6a6b3e-0010-4a3e-9c1a-000000000010",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - New Lead": {
+      "main": [[{ "node": "Normalize Payload", "type": "main", "index": 0 }]]
+    },
+    "Normalize Payload": {
+      "main": [[{ "node": "Call Scoring Service", "type": "main", "index": 0 }]]
+    },
+    "Call Scoring Service": {
+      "main": [[
+        { "node": "Is Hot Lead?", "type": "main", "index": 0 },
+        { "node": "Is Warm Lead?", "type": "main", "index": 0 }
+      ]]
+    },
+    "Is Hot Lead?": {
+      "main": [
+        [{ "node": "Slack - Alert Sales", "type": "main", "index": 0 }, { "node": "CRM - Create/Update Contact", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Is Warm Lead?": {
+      "main": [
+        [{ "node": "CRM - Add to Nurture List", "type": "main", "index": 0 }],
+        [{ "node": "Log Cold Lead", "type": "main", "index": 0 }]
+      ]
+    },
+    "Slack - Alert Sales": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "CRM - Create/Update Contact": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "CRM - Add to Nurture List": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "Log Cold Lead": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "portfolio-demo"
+  }
+}
